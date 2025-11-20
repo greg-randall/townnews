@@ -2,11 +2,27 @@ import os
 import json
 import html
 import re
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from dateutil import parser as date_parser
 
 from markdownify import markdownify as md
+
+
+def get_url_hash(url):
+    """
+    Generate MD5 hash of URL for use as filename.
+
+    Args:
+        url: Article URL string
+
+    Returns:
+        MD5 hash as hex string
+    """
+    if not url:
+        return None
+    return hashlib.md5(url.encode('utf-8')).hexdigest()
 
 
 def normalize_article(article_data, source_domain, scrape_timestamp):
@@ -137,16 +153,17 @@ def normalize_article(article_data, source_domain, scrape_timestamp):
     return normalized
 
 
-def normalize_townnews_file(input_filepath, scrape_timestamp=None):
+def normalize_townnews_file(input_filepath, output_dir, scrape_timestamp=None):
     """
-    Process a single TownNews JSON file and return normalized articles.
+    Process a single TownNews JSON file and write normalized articles to individual files.
 
     Args:
         input_filepath: Path to the raw JSON file
+        output_dir: Base directory for normalized output
         scrape_timestamp: Unix timestamp when this data was scraped (extracted from directory name)
 
     Returns:
-        List of normalized article dicts
+        Dict with statistics: articles_new, articles_skipped, errors
     """
     with open(input_filepath, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -168,19 +185,56 @@ def normalize_townnews_file(input_filepath, scrape_timestamp=None):
     filename = os.path.basename(input_filepath)
     domain = filename.replace(".json", "").replace("_", ".")
 
+    # Create domain-specific subdirectory
+    domain_dir = os.path.join(output_dir, domain)
+    os.makedirs(domain_dir, exist_ok=True)
+
+    # Track statistics
+    stats = {
+        "articles_new": 0,
+        "articles_skipped": 0,
+        "articles_skipped_image_type": 0,
+        "errors": 0
+    }
+
     # Process all articles in the "rows" field
     rows = data.get("rows", [])
-    normalized_articles = []
 
     for article in rows:
         try:
+            # Skip image-only items (just photos with captions)
+            if article.get("type") == "image":
+                stats["articles_skipped_image_type"] += 1
+                continue
+
+            # Get URL hash for filename
+            url = article.get("url")
+            url_hash = get_url_hash(url)
+
+            if not url_hash:
+                stats["errors"] += 1
+                continue
+
+            # Check if article already exists
+            output_filepath = os.path.join(domain_dir, f"{url_hash}.json")
+            if os.path.exists(output_filepath):
+                stats["articles_skipped"] += 1
+                continue
+
+            # Normalize and write article
             normalized = normalize_article(article, domain, scrape_timestamp)
-            normalized_articles.append(normalized)
+
+            with open(output_filepath, 'w', encoding='utf-8') as f:
+                json.dump(normalized, f, indent=2, ensure_ascii=False)
+
+            stats["articles_new"] += 1
+
         except Exception as e:
             print(f"Error normalizing article from {domain}: {e}")
+            stats["errors"] += 1
             continue
 
-    return normalized_articles
+    return stats
 
 
 def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized_news"):
@@ -194,10 +248,11 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
     # Create output directory if it doesn't exist
     os.makedirs(output_dir, exist_ok=True)
 
-    # Track statistics
-    stats = {
+    # Track overall statistics
+    overall_stats = {
         "files_processed": 0,
-        "articles_normalized": 0,
+        "articles_new": 0,
+        "articles_skipped": 0,
         "errors": 0
     }
 
@@ -210,6 +265,14 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
             if not timestamp_dir.is_dir():
                 continue
 
+            # Track statistics for this timestamp directory
+            timestamp_stats = {
+                "files_processed": 0,
+                "articles_new": 0,
+                "articles_skipped": 0,
+                "errors": 0
+            }
+
             # Process each JSON file in the timestamp directory
             for json_file in timestamp_dir.glob("*.json"):
                 # Skip summary files
@@ -218,40 +281,44 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
 
                 try:
                     print(f"Processing {json_file}...")
-                    normalized_articles = normalize_townnews_file(json_file)
+                    file_stats = normalize_townnews_file(json_file, output_dir)
 
-                    # Create output filename based on source file
-                    output_filename = f"townnews_{json_file.stem}.json"
-                    output_path = os.path.join(output_dir, output_filename)
+                    timestamp_stats["files_processed"] += 1
+                    timestamp_stats["articles_new"] += file_stats["articles_new"]
+                    timestamp_stats["articles_skipped"] += file_stats["articles_skipped"]
+                    timestamp_stats["errors"] += file_stats["errors"]
 
-                    # Write normalized data
-                    with open(output_path, 'w', encoding='utf-8') as f:
-                        json.dump(normalized_articles, f, indent=2, ensure_ascii=False)
-
-                    stats["files_processed"] += 1
-                    stats["articles_normalized"] += len(normalized_articles)
-                    print(f"  ✓ Wrote {len(normalized_articles)} articles to {output_path}")
+                    print(f"  ✓ New: {file_stats['articles_new']}, Skipped: {file_stats['articles_skipped']}, Errors: {file_stats['errors']}")
 
                 except Exception as e:
                     print(f"  ✗ Error processing {json_file}: {e}")
-                    stats["errors"] += 1
+                    timestamp_stats["errors"] += 1
 
-    # Write summary
-    summary_path = os.path.join(output_dir, "_normalization_summary.json")
-    summary = {
-        "timestamp": datetime.now().isoformat(),
-        "source": "townnews",
-        "statistics": stats
-    }
+            # Write summary for this timestamp directory
+            if timestamp_stats["files_processed"] > 0:
+                summary_path = timestamp_dir / "_normalization_summary.json"
+                summary = {
+                    "timestamp": datetime.now().isoformat(),
+                    "source": "townnews",
+                    "statistics": timestamp_stats
+                }
 
-    with open(summary_path, 'w', encoding='utf-8') as f:
-        json.dump(summary, f, indent=2)
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    json.dump(summary, f, indent=2)
+
+                print(f"  → Summary written to {summary_path}")
+
+            # Update overall statistics
+            overall_stats["files_processed"] += timestamp_stats["files_processed"]
+            overall_stats["articles_new"] += timestamp_stats["articles_new"]
+            overall_stats["articles_skipped"] += timestamp_stats["articles_skipped"]
+            overall_stats["errors"] += timestamp_stats["errors"]
 
     print(f"\n=== Normalization Complete ===")
-    print(f"Files processed: {stats['files_processed']}")
-    print(f"Articles normalized: {stats['articles_normalized']}")
-    print(f"Errors: {stats['errors']}")
-    print(f"Summary written to: {summary_path}")
+    print(f"Files processed: {overall_stats['files_processed']}")
+    print(f"Articles new: {overall_stats['articles_new']}")
+    print(f"Articles skipped: {overall_stats['articles_skipped']}")
+    print(f"Errors: {overall_stats['errors']}")
 
 
 if __name__ == "__main__":
