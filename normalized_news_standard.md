@@ -105,49 +105,74 @@ These fields MAY be included if available from the source:
 ## Data Format
 
 ### File Structure
-Normalized data should be stored as JSON files containing an array of article objects:
+Normalized data should be stored as **individual JSON files, one per article**, organized in domain subdirectories:
+
+```
+normalized_news/
+  example.com/
+    a1b2c3d4e5f6g7h8i9j0.json  (MD5 hash of article URL)
+    f9e8d7c6b5a4g3h2i1j0.json
+    ...
+  anothernews.org/
+    1234567890abcdef1234.json
+    ...
+```
+
+Each article file contains a single JSON object:
 
 ```json
-[
-  {
-    "url": "https://example.com/article1",
-    "title": "Article Title",
-    "article_text": "## Breaking News\n\nThis is the article content in **Markdown** format.\n\nSecond paragraph with a [link](https://example.com).",
-    "source_domain": "example.com",
-    "publication_date": "2025-11-20T14:30:00-06:00",
-    "publication_timestamp_gmt": 1732132200,
-    "first_seen_timestamp_gmt": 1732140000,
-    "author": "Jane Doe",
-    "keywords": ["politics", "local news", "breaking news", "national"]
-  },
-  {
-    "url": "https://example.com/article2",
-    "title": "Another Article",
-    "article_text": "Article content here...",
-    "source_domain": "example.com",
-    "publication_date": null,
-    "publication_timestamp_gmt": null,
-    "first_seen_timestamp_gmt": 1732140000,
-    "author": null,
-    "keywords": ["technology"]
-  }
-]
+{
+  "url": "https://example.com/article1",
+  "title": "Article Title",
+  "article_text": "## Breaking News\n\nThis is the article content in **Markdown** format.\n\nSecond paragraph with a [link](https://example.com).",
+  "source_domain": "example.com",
+  "publication_date": "2025-11-20T14:30:00-06:00",
+  "publication_timestamp_gmt": 1732132200,
+  "first_seen_timestamp_gmt": 1732140000,
+  "author": "Jane Doe",
+  "keywords": ["politics", "local news", "breaking news", "national"]
+}
 ```
 
 ### File Naming Convention
-Normalized files should follow this pattern:
+Each article file should be named using the **MD5 hash of its URL**:
 ```
-{source_type}_{domain}.json
+{md5_hash_of_url}.json
 ```
 
-Examples:
-- `townnews_athensreview_com.json`
-- `wordpress_localnews_org.json`
-- `custom_mynewssite_com.json`
+**Rationale:**
+- URL-based naming ensures natural deduplication (same URL = same file)
+- MD5 hashing creates valid, collision-resistant filenames
+- Portable across different news sources (not dependent on source-specific IDs)
+- Enables efficient skip-if-exists checking for incremental scraping
+
+**Example:**
+```python
+import hashlib
+url = "https://example.com/article1"
+filename = hashlib.md5(url.encode('utf-8')).hexdigest() + ".json"
+# Result: "a1b2c3d4e5f6g7h8i9j0.json"
+```
+
+### Directory Structure
+- **One directory per source domain** (e.g., `example.com/`, `news.org/`)
+- Domain names should match the `source_domain` field
+- Directories created automatically as needed during normalization
 
 ## Summary File
 
-Each normalization run should produce a summary file named `_normalization_summary.json`:
+Each normalization run should produce a summary file named `_normalization_summary.json` in the **raw data timestamp directory** (not in the normalized_news directory):
+
+```
+raw_news_data/
+  2025-11-20/
+    1763657957/
+      example_com.json
+      _collection_summary.json
+      _normalization_summary.json  ← Summary goes here
+```
+
+Summary format:
 
 ```json
 {
@@ -155,11 +180,20 @@ Each normalization run should produce a summary file named `_normalization_summa
   "source": "townnews",
   "statistics": {
     "files_processed": 35,
-    "articles_normalized": 3339,
+    "articles_new": 1525,
+    "articles_skipped": 0,
+    "articles_skipped_image_type": 1975,
     "errors": 0
   }
 }
 ```
+
+**Statistics fields:**
+- `files_processed`: Number of raw data files processed
+- `articles_new`: New articles normalized and written
+- `articles_skipped`: Articles already normalized (file exists)
+- `articles_skipped_image_type`: Items filtered out (e.g., image-only posts)
+- `errors`: Number of errors encountered
 
 ## Implementation Notes
 
@@ -173,6 +207,20 @@ Each normalization run should produce a summary file named `_normalization_summa
 - Calculate timestamps in GMT/UTC timezone
 - Preserve original date string for debugging/reference
 - Handle timezone conversions properly (source may be in local time)
+
+### Deduplication & Incremental Processing
+- **Check if article file exists** before normalizing (by MD5 hash of URL)
+- If file exists, skip normalization (don't re-process)
+- Track skipped count in statistics
+- This enables efficient daily scraping without re-processing existing articles
+
+### Content Filtering
+- **Filter out non-article content types** before normalization
+- Example filters:
+  - TownNews: Skip items with `"type": "image"` (photo galleries, standalone images)
+  - WordPress: Skip items with `post_type` other than `"post"`
+- Track filtered items separately in statistics
+- Reduces storage and focuses dataset on actual news content
 
 ### Error Handling
 - If a required field cannot be populated, use `null` for nullable fields
@@ -200,6 +248,15 @@ Scrapers should validate each normalized article has:
    - If `author` is present, it must be a string or null
 
 ## Version History
+
+- **v3.0** (2025-11-20): Per-article file structure
+  - **Changed from array-of-articles to one-file-per-article structure**
+  - Files named using MD5 hash of URL for natural deduplication
+  - Organized in domain subdirectories (`example.com/`, `news.org/`)
+  - Added skip-if-exists logic for efficient incremental scraping
+  - Added content type filtering (e.g., skip image-only posts)
+  - Normalization summary moved to raw data timestamp directory
+  - Statistics now track: `articles_new`, `articles_skipped`, `articles_skipped_image_type`, `errors`
 
 - **v2.1** (2025-11-20): Added first_seen tracking
   - Added `first_seen_timestamp_gmt` as a **required field**
