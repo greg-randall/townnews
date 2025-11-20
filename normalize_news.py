@@ -253,6 +253,7 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
         "files_processed": 0,
         "articles_new": 0,
         "articles_skipped": 0,
+        "articles_skipped_image_type": 0,
         "errors": 0
     }
 
@@ -270,6 +271,7 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
                 "files_processed": 0,
                 "articles_new": 0,
                 "articles_skipped": 0,
+                "articles_skipped_image_type": 0,
                 "errors": 0
             }
 
@@ -286,9 +288,10 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
                     timestamp_stats["files_processed"] += 1
                     timestamp_stats["articles_new"] += file_stats["articles_new"]
                     timestamp_stats["articles_skipped"] += file_stats["articles_skipped"]
+                    timestamp_stats["articles_skipped_image_type"] += file_stats["articles_skipped_image_type"]
                     timestamp_stats["errors"] += file_stats["errors"]
 
-                    print(f"  ✓ New: {file_stats['articles_new']}, Skipped: {file_stats['articles_skipped']}, Errors: {file_stats['errors']}")
+                    print(f"  ✓ New: {file_stats['articles_new']}, Skipped: {file_stats['articles_skipped']}, Images: {file_stats['articles_skipped_image_type']}, Errors: {file_stats['errors']}")
 
                 except Exception as e:
                     print(f"  ✗ Error processing {json_file}: {e}")
@@ -312,12 +315,14 @@ def process_all_raw_data(raw_data_dir="raw_news_data", output_dir="../normalized
             overall_stats["files_processed"] += timestamp_stats["files_processed"]
             overall_stats["articles_new"] += timestamp_stats["articles_new"]
             overall_stats["articles_skipped"] += timestamp_stats["articles_skipped"]
+            overall_stats["articles_skipped_image_type"] += timestamp_stats["articles_skipped_image_type"]
             overall_stats["errors"] += timestamp_stats["errors"]
 
     print(f"\n=== Normalization Complete ===")
     print(f"Files processed: {overall_stats['files_processed']}")
     print(f"Articles new: {overall_stats['articles_new']}")
-    print(f"Articles skipped: {overall_stats['articles_skipped']}")
+    print(f"Articles skipped (already exists): {overall_stats['articles_skipped']}")
+    print(f"Articles skipped (image type): {overall_stats['articles_skipped_image_type']}")
     print(f"Errors: {overall_stats['errors']}")
 
 
