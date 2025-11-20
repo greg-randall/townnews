@@ -92,7 +92,19 @@ def normalize_article(article_data, source_domain, scrape_timestamp):
 
     # Prefer structured authors list, fall back to byline
     if authors_list:
-        author = ", ".join(authors_list)
+        # Authors can be either strings or dicts with author info
+        author_names = []
+        for author_item in authors_list:
+            if isinstance(author_item, str):
+                author_names.append(author_item)
+            elif isinstance(author_item, dict):
+                # Try to extract name from dict (prefer full_name, then combine first/last)
+                name = (author_item.get("full_name") or
+                       f"{author_item.get('first_name', '')} {author_item.get('last_name', '')}".strip() or
+                       author_item.get("screen_name"))
+                if name:
+                    author_names.append(name)
+        author = ", ".join(author_names) if author_names else None
     elif byline:
         author = byline
     else:
