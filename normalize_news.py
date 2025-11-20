@@ -6,44 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from dateutil import parser as date_parser
 
-try:
-    from markdownify import markdownify as md
-except ImportError:
-    # Fallback: simple HTML to markdown converter
-    def md(html_text, **kwargs):
-        """Simple HTML to Markdown converter if markdownify is not available."""
-        text = html_text
-        # Convert headers
-        text = re.sub(r'<h1[^>]*>(.*?)</h1>', r'# \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<h2[^>]*>(.*?)</h2>', r'## \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<h3[^>]*>(.*?)</h3>', r'### \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<h4[^>]*>(.*?)</h4>', r'#### \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<h5[^>]*>(.*?)</h5>', r'##### \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<h6[^>]*>(.*?)</h6>', r'###### \1\n', text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Convert links
-        text = re.sub(r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)', text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Convert bold and italic
-        text = re.sub(r'<(?:strong|b)[^>]*>(.*?)</(?:strong|b)>', r'**\1**', text, flags=re.DOTALL | re.IGNORECASE)
-        text = re.sub(r'<(?:em|i)[^>]*>(.*?)</(?:em|i)>', r'*\1*', text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Convert paragraphs
-        text = re.sub(r'<p[^>]*>(.*?)</p>', r'\1\n\n', text, flags=re.DOTALL | re.IGNORECASE)
-
-        # Convert line breaks
-        text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
-
-        # Convert horizontal rules
-        text = re.sub(r'<hr\s*/?>', '\n---\n', text, flags=re.IGNORECASE)
-
-        # Remove remaining HTML tags
-        text = re.sub(r'<[^>]+>', '', text)
-
-        # Clean up multiple newlines
-        text = re.sub(r'\n{3,}', '\n\n', text)
-
-        return text.strip()
+from markdownify import markdownify as md
 
 
 def normalize_article(article_data, source_domain, scrape_timestamp):
