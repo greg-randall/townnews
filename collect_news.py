@@ -5,9 +5,13 @@ import asyncio
 from datetime import datetime
 from nodriver_helper import NodriverBrowser, fetch_json_from_urls
 
-async def collect_news(domains_file="townnews.txt"):
+async def collect_news(domains_file="townnews.txt", debug_mode=False):
     """
     Collects news articles from a list of TownNews CMS domains using nodriver.
+
+    Args:
+        domains_file: Path to file containing list of domains (default: 'townnews.txt')
+        debug_mode: If True, saves ALL page content (success and error) for inspection (default: False)
     """
     # Create the main directory for raw news data if it doesn't exist
     if not os.path.exists("raw_news_data"):
@@ -83,7 +87,8 @@ async def collect_news(domains_file="townnews.txt"):
             debug_dir="debug_pages",
             on_success=on_success,
             on_error=on_error,
-            progress_desc="Collecting news"
+            progress_desc="Collecting news",
+            debug_mode=debug_mode
         )
 
     # Write summary file
