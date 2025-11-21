@@ -3,7 +3,8 @@ import asyncio
 import json
 import random
 import os
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Callable, Any
+from tqdm import tqdm
 
 
 class NodriverBrowser:
@@ -81,11 +82,15 @@ async def fetch_json_from_urls(
     selector: str = 'body',
     selector_timeout: float = 10.0,
     delay_range: Tuple[float, float] = (3.0, 15.0),
-    debug_dir: Optional[str] = "debug_pages"
+    debug_dir: Optional[str] = "debug_pages",
+    on_success: Optional[Callable[[str, dict, int], Any]] = None,
+    on_error: Optional[Callable[[str, str, Optional[str], int], Any]] = None,
+    progress_desc: str = "Fetching URLs"
 ) -> List[Dict]:
     """
     Fetch and parse JSON content from multiple URLs using a single browser instance.
     Each URL is opened in a new tab for isolation, then closed after processing.
+    Results are saved immediately via callbacks as they are fetched.
 
     Args:
         browser: Active nodriver browser instance
@@ -95,6 +100,9 @@ async def fetch_json_from_urls(
         selector_timeout: Timeout for selector wait in seconds (default: 10.0)
         delay_range: Tuple of (min, max) seconds for random delay between requests (default: 3-15)
         debug_dir: Directory to save failed page content for debugging (default: 'debug_pages', None to disable)
+        on_success: Callback function(url, data, index) called immediately when URL is successfully fetched
+        on_error: Callback function(url, error, content, index) called immediately when URL fetch fails
+        progress_desc: Description for the progress bar (default: 'Fetching URLs')
 
     Returns:
         List of result dictionaries, one per URL:
@@ -103,7 +111,7 @@ async def fetch_json_from_urls(
     """
     results = []
 
-    for i, url in enumerate(urls):
+    for i, url in tqdm(enumerate(urls), total=len(urls), desc=progress_desc, unit="url"):
         page = None
         content = None
 
@@ -126,6 +134,10 @@ async def fetch_json_from_urls(
             # Parse JSON from content
             data = extract_json_from_content(content)
 
+            # Call success callback immediately if provided
+            if on_success:
+                on_success(url, data, i)
+
             results.append({
                 "url": url,
                 "status": "success",
@@ -144,6 +156,10 @@ async def fetch_json_from_urls(
 
                 with open(debug_path, "w") as f:
                     f.write(content)
+
+            # Call error callback immediately if provided
+            if on_error:
+                on_error(url, str(e), content, i)
 
             results.append({
                 "url": url,

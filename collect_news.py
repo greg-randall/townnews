@@ -3,7 +3,6 @@ import json
 import time
 import asyncio
 from datetime import datetime
-from tqdm import tqdm
 from nodriver_helper import NodriverBrowser, fetch_json_from_urls
 
 async def collect_news(domains_file="townnews.txt"):
@@ -41,51 +40,51 @@ async def collect_news(domains_file="townnews.txt"):
     # Build list of URLs from domains
     urls = [f"https://{domain}/search/?l=100&f=json" for domain in domains]
 
+    # Define callbacks to save data as we fetch it
+    def on_success(url, data, index):
+        domain = domains[index]
+
+        # Sanitize domain for filename
+        filename = domain.replace(".", "_") + ".json"
+        filepath = os.path.join(timestamp_dir, filename)
+
+        # Save JSON immediately
+        with open(filepath, 'w') as f:
+            json.dump(data, f, indent=2)
+
+        # Update summary
+        summary["results"].append({
+            "domain": domain,
+            "status": "success",
+            "article_count": data.get("total", 0),
+            "file_path": filepath
+        })
+
+    def on_error(url, error, content, index):
+        domain = domains[index]
+
+        # Update summary
+        summary["results"].append({
+            "domain": domain,
+            "status": "error",
+            "error_message": error
+        })
+
     # Use context manager for browser lifecycle
     async with NodriverBrowser() as browser:
-        # Fetch all URLs using single browser instance
-        print(f"Fetching {len(urls)} URLs...")
-        results = await fetch_json_from_urls(
+        # Fetch all URLs using single browser instance with callbacks
+        await fetch_json_from_urls(
             browser,
             urls,
             wait_time=3.0,
             selector='body',
             selector_timeout=10.0,
             delay_range=(3.0, 15.0),
-            debug_dir="debug_pages"
+            debug_dir="debug_pages",
+            on_success=on_success,
+            on_error=on_error,
+            progress_desc="Collecting news"
         )
-
-    # Process results and save data
-    for domain, result in tqdm(zip(domains, results), desc="Processing results", unit="domain", total=len(domains)):
-        if result["status"] == "success":
-            data = result["data"]
-
-            # Sanitize domain for filename
-            filename = domain.replace(".", "_") + ".json"
-            filepath = os.path.join(timestamp_dir, filename)
-
-            with open(filepath, 'w') as f:
-                json.dump(data, f, indent=2)
-
-            summary["results"].append({
-                "domain": domain,
-                "status": "success",
-                "article_count": data.get("total", 0),
-                "file_path": filepath
-            })
-            print(f"Successfully collected data from {domain}")
-
-        else:
-            # Handle error case
-            if result.get("content"):
-                print(f"Saved page content for {domain} to debug_pages/")
-
-            summary["results"].append({
-                "domain": domain,
-                "status": "error",
-                "error_message": result["error"]
-            })
-            print(f"Error collecting data from {domain}: {result['error']}")
 
     # Write summary file
     summary_filepath = os.path.join(timestamp_dir, "_collection_summary.json")
