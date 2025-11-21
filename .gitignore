@@ -3,3 +3,4 @@
 raw_news_data/*
 *.txt
 old/*
+__pycache__/
