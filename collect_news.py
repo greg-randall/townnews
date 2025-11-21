@@ -1,11 +1,10 @@
 import os
 import json
-import nodriver as uc
-import asyncio
 import time
-import random
+import asyncio
 from datetime import datetime
 from tqdm import tqdm
+from nodriver_helper import NodriverBrowser, fetch_json_from_urls
 
 async def collect_news(domains_file="townnews.txt"):
     """
@@ -39,41 +38,27 @@ async def collect_news(domains_file="townnews.txt"):
         print(f"Error: '{domains_file}' not found.")
         return
 
-    browser = await uc.start()
+    # Build list of URLs from domains
+    urls = [f"https://{domain}/search/?l=100&f=json" for domain in domains]
 
-    for domain in tqdm(domains, desc="Collecting news", unit="domain"):
-        page = None
-        try:
-            url = f"https://{domain}/search/?l=100&f=json"
-            # use new_tab=True for isolation between requests
-            page = await browser.get(url, new_tab=True)
+    # Use context manager for browser lifecycle
+    async with NodriverBrowser() as browser:
+        # Fetch all URLs using single browser instance
+        print(f"Fetching {len(urls)} URLs...")
+        results = await fetch_json_from_urls(
+            browser,
+            urls,
+            wait_time=3.0,
+            selector='body',
+            selector_timeout=10.0,
+            delay_range=(3.0, 15.0),
+            debug_dir="debug_pages"
+        )
 
-            # Wait for the page to load - give it time to render
-            await page.sleep(3)
-
-            # Try to wait for body to be present
-            try:
-                await page.select('body', timeout=10)
-            except Exception:
-                pass  # Continue even if body selector times out
-
-            content = await page.get_content()
-
-            data = None
-            try:
-                # First, assume content is pure JSON
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                # If not, assume it's HTML with embedded JSON.
-                # A simple way to extract it without a new dependency.
-                start_idx = content.find('{')
-                end_idx = content.rfind('}') + 1
-                if start_idx != -1 and end_idx != 0:
-                    json_str = content[start_idx:end_idx]
-                    data = json.loads(json_str)
-                else:
-                    # If we can't find it, raise an error to be caught below
-                    raise ValueError("Could not extract JSON from page content.")
+    # Process results and save data
+    for domain, result in tqdm(zip(domains, results), desc="Processing results", unit="domain", total=len(domains)):
+        if result["status"] == "success":
+            data = result["data"]
 
             # Sanitize domain for filename
             filename = domain.replace(".", "_") + ".json"
@@ -90,40 +75,17 @@ async def collect_news(domains_file="townnews.txt"):
             })
             print(f"Successfully collected data from {domain}")
 
-        except Exception as e:
-            if 'content' in locals() and content:
-                debug_dir = "debug_pages"
-                if not os.path.exists(debug_dir):
-                    os.makedirs(debug_dir)
-                safe_domain = domain.replace(".", "_")
-                with open(os.path.join(debug_dir, f"{safe_domain}.html"), "w") as f:
-                    f.write(content)
-                print(f"Saved page content for {domain} to debug_pages/{safe_domain}.html")
+        else:
+            # Handle error case
+            if result.get("content"):
+                print(f"Saved page content for {domain} to debug_pages/")
 
             summary["results"].append({
                 "domain": domain,
                 "status": "error",
-                "error_message": str(e)
+                "error_message": result["error"]
             })
-            print(f"Error collecting data from {domain}: {e}")
-        finally:
-            if page:
-                try:
-                    await page.close()
-                except Exception:
-                    pass  # Ignore errors when closing page
-
-            # Random delay between 3 and 15 seconds for stealth
-            delay = random.uniform(3, 15)
-            print(f"Waiting {delay:.1f} seconds before next domain...")
-            await asyncio.sleep(delay)
-
-
-    if browser:
-        try:
-            await browser.stop()
-        except Exception:
-            pass  # Ignore errors when stopping browser
+            print(f"Error collecting data from {domain}: {result['error']}")
 
     # Write summary file
     summary_filepath = os.path.join(timestamp_dir, "_collection_summary.json")
@@ -136,4 +98,4 @@ async def main():
     await collect_news()
 
 if __name__ == "__main__":
-    uc.loop().run_until_complete(main())
+    asyncio.run(main())
